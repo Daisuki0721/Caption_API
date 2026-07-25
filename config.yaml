@@ -1,0 +1,5 @@
+models:
+  qwen3.5-omni-plus:
+    input_video_price_per_1m: 7.0
+    input_audio_price_per_1m: 53.0
+    output_text_price_per_1m: 40.0

@@ -1,0 +1,3 @@
+cd /Users/daisuki/Documents/Projects/API/API_test && python -m http.server 8000 --directory ./public
+
+cd /Users/daisuki/Documents/Projects/API/API_test && cloudflared tunnel --url http://localhost:8000
