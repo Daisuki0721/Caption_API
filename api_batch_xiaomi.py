@@ -17,7 +17,7 @@ from pathlib import Path
 
 
 API_URL = "https://api.llm.mioffice.cn/v1/chat/completions"
-MODEL = "tongyi/qwen3-omni-flash-2025-12-01"
+MODEL = "vertex_ai/gemini-3.5-flash"
 TARGET_FPS = 10
 TARGET_HEIGHT = 480
 MEDIA_RESOLUTION = "default"

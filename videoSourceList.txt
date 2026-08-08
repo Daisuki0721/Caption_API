@@ -1,0 +1,66 @@
+# 视频源路径清单
+# 注意指向装视频文件夹的上级路径
+# 路径下应该存在两个文件夹，原视频放在sources文件夹中
+# 提取完成的文件夹名称为sources_extracted
+# 提取完成后一定要执行init_jsonl.py以启动标注流水线
+
+
+
+# train_samples视频样例
+# /mnt/vlm-ks3/chenkaijin/train_samples
+
+
+
+# 导出用于训练的视频
+/mnt/vlm-ks3/chenkaijin/export/export_1783769193
+
+
+
+# ---------------------< mira_test >----------------------
+# 大部分为高质量游戏画面数据集
+# 该文件夹数据存在缺陷：大部分视频含有BGM
+/mnt/vlm-ks3/chenkaijin/mira_test
+
+
+
+# ------------------< spaceaudio_extra >------------------
+# spaceaudio_extra1
+# 数据集质量较低，大多数视频画质较差
+/mnt/vlm-ks3/chenkaijin/spaceaudio_extra/spaceaudio_extra1
+
+# spaceaudio_extra2
+# 以 city_walk 为主，数据集质量较高
+/mnt/vlm-ks3/chenkaijin/spaceaudio_extra/spaceaudio_extra2
+
+# spaceaudio_extra3
+/mnt/vlm-ks3/chenkaijin/spaceaudio_extra/spaceaudio_extra3
+
+# game_new
+/mnt/vlm-ks3/chenkaijin/spaceaudio_extra/game_new
+
+# game_new2
+/mnt/vlm-ks3/chenkaijin/spaceaudio_extra/game_new2
+
+# game_new3
+/mnt/vlm-ks3/chenkaijin/spaceaudio_extra/game_new3
+
+
+
+# -----------------------< sekai >-------------------------
+# sekai_game_walking
+/mnt/vlm-ks3/chenkaijin/sekai_game/sekai/sekai-game-walking
+
+# sekai_game_drone
+# 视频过短，弃用
+# /mnt/vlm-ks3/chenkaijin/sekai_game/sekai/sekai-game-drone
+
+
+
+# ------------------< bilibili-walking >--------------------
+# walking_v1
+/mnt/vlm-ks3/chenkaijin/spaceaudio_extra/walking_v1
+
+# bilibili_videos_v1
+/mnt/vlm-ks3/chenkaijin/spaceaudio_extra/bilibili_videos_v1
+
+

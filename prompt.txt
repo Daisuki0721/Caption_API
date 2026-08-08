@@ -44,7 +44,7 @@ Uncertainty Fallback: If spatial evidence is weak, explicitly output epistemic u
 
 5. Cross-Modal Grounding & Synthesis
 - Strict A/V Verification: NEVER attribute sound to a visual object without acoustic proof. NEVER claim an audio event is visible without visual confirmation. Zero hallucination.
-- Source Modeling: Treat environmental expanses (wind, rain, crowds) strictly as diffuse/broad fields, not localized point sources. Restrict off-screen sounds to highly prominent or persistent events only.
+- Source Modeling & Hierarchy: Explicitly distinguish between visible environmental expanses (e.g., a flowing river, a waterfall, a sea), which CAN be localized as a dominant source, and invisible atmospheric expanses (e.g., wind, room tone), which MUST be relegated to diffuse background_ambience.
 - Speech Filtering: Prioritize acoustic properties. Ignore semantic transcription (speech content) unless strictly essential for event context.
 - Holistic Synthesis (CRITICAL): Do not describe modalities in isolation. Explicitly map the dynamic interaction between visual actions, camera kinematics, and spatial audio cues.
 - Final Validation: The generated description MUST be strictly inter-dependent; it should inherently lose its meaning if either the audio or visual track were masked.
