@@ -1,212 +1,103 @@
-import os
-import yaml
+#!/usr/bin/env python3
+"""Submit one public video URL to DashScope Chat Completions."""
+
+import argparse
+import copy
 import json
-import subprocess
+import os
 import re
+import subprocess
 import time
-from datetime import datetime
+from pathlib import Path
+
 from openai import OpenAI
+import yaml
 
-def main():
-    # 1. 隧道链接配置
-    TUNNEL_BASE_URL = "https://elements-gnome-rachel-extension.trycloudflare.com"
+ROOT_DIR = Path(__file__).resolve().parent
 
-    # 2. 前置校验：加载配置与 Prompt
-    if not os.path.exists('config.yaml'):
-        raise FileNotFoundError("找不到 config.yaml 配置文件")
-    with open('config.yaml', 'r', encoding='utf-8') as f:
-        config = yaml.safe_load(f)
-    prices = config['models']['qwen3.5-omni-plus']
 
-    if not os.path.exists('prompt.txt'):
-        raise FileNotFoundError("找不到 prompt.txt 文件")
-    with open('prompt.txt', 'r', encoding='utf-8') as f:
-        final_prompt = f.read().strip()
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--video", type=Path, default=ROOT_DIR / "assets" / "sea.mp4")
+    parser.add_argument("--prompt", type=Path, default=ROOT_DIR / "prompt.txt")
+    parser.add_argument("--config", type=Path, default=ROOT_DIR / "config.yaml")
+    parser.add_argument("--results-dir", type=Path, default=ROOT_DIR / "results")
+    parser.add_argument("--public-dir", type=Path, default=ROOT_DIR / "public")
+    parser.add_argument("--public-base-url", default=os.getenv("PUBLIC_BASE_URL"))
+    return parser.parse_args()
 
-    # 核心判断：是否属于 JSON 模式请求
-    is_json_mode = "json" in final_prompt.lower()
-    if is_json_mode:
-        print("探测到 'json' 关键字，启用严格 JSON 输出模式")
-    else:
-        print("未探测到 'json' 关键字，启用普通文本自由输出模式")
 
-    # 3. 初始化客户端
-    client = OpenAI(
-        api_key=os.getenv("DASHSCOPE_API_KEY"),
-        base_url="https://ws-9eaupaeyp0hh6lcp.cn-beijing.maas.aliyuncs.com/compatible-mode/v1",
-    )
+def transcode_video(source: Path, destination: Path) -> None:
+    command = ["ffmpeg", "-y", "-i", str(source), "-t", "60", "-vf", "scale=-2:480", "-r", "10", "-c:v", "libx264", "-preset", "fast", "-c:a", "aac", "-ac", "2", "-b:a", "128k", str(destination)]
+    result = subprocess.run(command, capture_output=True, text=True)
+    if result.returncode:
+        raise RuntimeError(f"ffmpeg failed:\n{result.stderr}")
 
-    # 4. 路径与资源校验
-    local_video_path = "/Users/daisuki/Documents/Projects/API/API_test/assets/sea.mp4"
-    if not os.path.exists(local_video_path):
-        raise FileNotFoundError(f"找不到源视频文件: {local_video_path}")
-        
-    video_name = os.path.basename(local_video_path) 
 
-    public_dir = os.path.join(os.getcwd(), 'public')
-    results_dir = os.path.join(os.getcwd(), 'results')
-    os.makedirs(public_dir, exist_ok=True)
-    os.makedirs(results_dir, exist_ok=True)
+def render_template(value: object, **variables: str) -> object:
+    if isinstance(value, str):
+        return value.format(**variables)
+    if isinstance(value, list):
+        return [render_template(item, **variables) for item in value]
+    if isinstance(value, dict):
+        return {key: render_template(item, **variables) for key, item in value.items()}
+    return value
 
-    output_filename = "temp_pilot_test.mp4"
-    exposed_file_path = os.path.join(public_dir, output_filename)
-    public_video_url = f"{TUNNEL_BASE_URL}/{output_filename}"
 
-    print(f"\n开始压缩视频 (全长 1 分钟，高画质，双声道保留)...")
-
+def format_response(content: str, video_name: str, json_mode: bool) -> tuple[str, str]:
+    if not json_mode:
+        return f"Video: {video_name}\n{'=' * 40}\n{content.strip()}\n", ".txt"
+    cleaned = re.sub(r"^```json\s*|\s*```$", "", content.strip()).strip()
     try:
-        # 5. FFmpeg 压缩处理
-        cmd = [
-            'ffmpeg', '-y', '-i', local_video_path,
-            '-t', '60',            
-            '-vf', 'scale=-2:480', 
-            '-r', '10',            
-            '-c:v', 'libx264', '-preset', 'fast',
-            '-c:a', 'aac', '-ac', '2', '-b:a', '128k', 
-            exposed_file_path
-        ]
-        process = subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
-        if process.returncode != 0:
-            raise RuntimeError(f"FFmpeg 压缩失败:\n{process.stderr.decode('utf-8')}")
+        response = json.loads(cleaned)
+    except json.JSONDecodeError:
+        response = {"video": video_name, "raw_result": cleaned}
+    else:
+        response["video"] = video_name
+    return json.dumps(response, ensure_ascii=False, indent=2) + "\n", ".json"
 
-        print(f"视频已就绪！映射地址为: {public_video_url}")
-        
-        messages = [
-            {
-                "role": "user",
-                "content": [
-                    {"type": "video_url", "video_url": {"url": public_video_url}},
-                    {"type": "text", "text": final_prompt}
-                ]
-            }
-        ]
 
-        # 动态构建请求参数
-        api_kwargs = {
-            "model": "qwen3.5-omni-plus",
-            "messages": messages,
-            "stream": False,
-            "timeout": 120
-        }
-        if is_json_mode:
-            api_kwargs["response_format"] = {"type": "json_object"}
+def main() -> None:
+    args = parse_args()
+    if not args.video.is_file():
+        raise FileNotFoundError(f"Video file not found: {args.video}")
+    if not args.prompt.is_file() or not args.config.is_file():
+        raise FileNotFoundError("Both --prompt and --config must point to existing files.")
+    if not args.public_base_url:
+        raise ValueError("Set --public-base-url or PUBLIC_BASE_URL.")
 
-        # API 请求重试机制
-        max_retries = 3
-        completion = None
-        
-        print("正在请求大模型，请确保你的隧道服务正常运行中...\n")
-        for attempt in range(max_retries):
+    prompt = args.prompt.read_text(encoding="utf-8").strip()
+    config = yaml.safe_load(args.config.read_text(encoding="utf-8"))["api"]
+    args.public_dir.mkdir(parents=True, exist_ok=True)
+    args.results_dir.mkdir(parents=True, exist_ok=True)
+    public_name = f"request_{args.video.stem}.mp4"
+    public_path = args.public_dir / public_name
+    try:
+        print(f"Transcoding {args.video.name}...")
+        transcode_video(args.video, public_path)
+        video_url = f"{args.public_base_url.rstrip('/')}/{public_name}"
+        request = render_template(copy.deepcopy(config["request"]), video_url=video_url, prompt=prompt)
+        if "json" in prompt.lower():
+            request["response_format"] = config["json_response_format"]
+        client = OpenAI(api_key=os.getenv("DASHSCOPE_API_KEY"), base_url=config["base_url"])
+        for attempt in range(1, 4):
             try:
-                completion = client.chat.completions.create(**api_kwargs)
-                break 
-            except Exception as api_err:
-                if attempt == max_retries - 1:
-                    raise RuntimeError(f"API 调用在 {max_retries} 次尝试后彻底失败: {str(api_err)}")
-                print(f"API 请求异常 (尝试 {attempt + 1}/{max_retries}): {str(api_err)}")
-                print("等待 3 秒后重试...")
+                completion = client.chat.completions.create(**request)
+                break
+            except Exception:
+                if attempt == 3:
+                    raise
+                print(f"Request failed; retrying ({attempt}/3)...")
                 time.sleep(3)
-
-        # 6. 数据清洗与文件写入 (分流处理)
-        raw_content = completion.choices[0].message.content
-
-        if is_json_mode:
-            # --- JSON 模式处理 ---
-            cleaned_text = re.sub(r'^```json\s*|\s*```$', '', raw_content.strip()).strip()
-            if cleaned_text.startswith('{'):
-                new_start = '{\n  "video": "' + video_name + '",'
-                final_json_block = new_start + cleaned_text[1:]
-            else:
-                final_json_block = '{\n  "video": "' + video_name + '",\n  "raw_result": ' + json.dumps(cleaned_text, ensure_ascii=False) + '\n}'
-
-            output_path = os.path.join(results_dir, f"{video_name}.json")
-            with open(output_path, 'w', encoding='utf-8') as f:
-                f.write(final_json_block + '\n')
-            print(f"JSON 结果已写入: {output_path}")
-            
-            # 屏幕回显
-            try:
-                json_result = json.loads(cleaned_text)
-                print(f"全局声景:\n{json_result.get('global_soundscape', '未提取到')}\n")
-                print(f"最终 Caption:\n{json_result.get('final_caption', '未提取到')}\n")
-            except json.JSONDecodeError:
-                print("屏幕回显解析失败，请直接查看生成的文件。")
-                
-        else:
-            # --- 普通文本模式处理 ---
-            output_path = os.path.join(results_dir, f"{video_name}.txt")
-            with open(output_path, 'w', encoding='utf-8') as f:
-                f.write(f"Video: {video_name}\n")
-                f.write("="*40 + "\n")
-                f.write(raw_content.strip() + '\n')
-            print(f"普通文本结果已写入: {output_path}")
-            print(f"模型原始输出:\n{raw_content.strip()}\n")
-
-        print("="*60)
-        
-        # 7. 计费统计与历史追加逻辑
+        output, suffix = format_response(completion.choices[0].message.content or "", args.video.name, "json" in prompt.lower())
+        output_path = args.results_dir / f"{args.video.stem}{suffix}"
+        output_path.write_text(output, encoding="utf-8")
         usage = completion.usage
-        prompt_details = getattr(usage, 'prompt_tokens_details', {})
-        audio_in_tokens = prompt_details.get('audio_tokens', 0) if hasattr(prompt_details, 'get') else 0
-        visual_text_in_tokens = usage.prompt_tokens - audio_in_tokens
-        text_out_tokens = usage.completion_tokens
-
-        cost_visual_text_in = (visual_text_in_tokens / 1000000) * prices['input_video_price_per_1m']
-        cost_audio_in = (audio_in_tokens / 1000000) * prices['input_audio_price_per_1m']
-        cost_text_out = (text_out_tokens / 1000000) * prices['output_text_price_per_1m']
-        total_current_cost = cost_visual_text_in + cost_audio_in + cost_text_out
-
-        # 读取并更新 consume-history.txt
-        history_file = os.path.join(os.getcwd(), 'consume-history.txt')
-        
-        history_total_in = 0
-        history_total_out = 0
-        history_total_cost = 0.0
-        
-        # 使用正则精准抓取最后的历史总计
-        if os.path.exists(history_file):
-            with open(history_file, 'r', encoding='utf-8') as f:
-                content = f.read()
-                in_match = re.findall(r"历史总计消耗 Input Tokens:\s*(\d+)", content)
-                out_match = re.findall(r"历史总计消耗 Output Tokens:\s*(\d+)", content)
-                cost_match = re.findall(r"历史总计费用:\s*¥([0-9.]+)", content)
-                
-                if in_match: history_total_in = int(in_match[-1])
-                if out_match: history_total_out = int(out_match[-1])
-                if cost_match: history_total_cost = float(cost_match[-1])
-
-        # 累加本次消耗
-        new_total_in = history_total_in + usage.prompt_tokens
-        new_total_out = history_total_out + usage.completion_tokens
-        new_total_cost = history_total_cost + total_current_cost
-
-        # 追加写入日志文件
-        with open(history_file, 'a', encoding='utf-8') as f:
-            now_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-            f.write(f"[{now_str}] 推理任务: {video_name} (模式: {'JSON' if is_json_mode else '文本'})\n")
-            f.write(f"  本次消耗 - Input: {usage.prompt_tokens} (Audio: {audio_in_tokens}, Visual/Text: {visual_text_in_tokens}), Output: {text_out_tokens}\n")
-            f.write(f"  本次费用 - ¥{total_current_cost:.6f}\n")
-            f.write(f"  历史总计消耗 Input Tokens: {new_total_in}\n")
-            f.write(f"  历史总计消耗 Output Tokens: {new_total_out}\n")
-            f.write(f"  历史总计费用: ¥{new_total_cost:.6f}\n")
-            f.write("-" * 50 + "\n")
-
-        print("--- 本次计费统计 ---")
-        print(f"消耗 Token: 输入 {usage.prompt_tokens} | 输出 {usage.completion_tokens}")
-        print(f"预估花费: ¥{total_current_cost:.6f}")
-        print(f"\n已将计费结果追加至 {history_file} (当前总计花费: ¥{new_total_cost:.6f})")
-
-    except Exception as e:
-        print(f"\n[致命错误] 执行流程中断: {str(e)}")
-
+        print(f"Saved result to {output_path}")
+        print(f"Usage: input={usage.prompt_tokens}, output={usage.completion_tokens}")
     finally:
-        # 安全的清理机制
-        if 'exposed_file_path' in locals() and os.path.exists(exposed_file_path):
-            try:
-                os.remove(exposed_file_path)
-                print("\n临时生成的隧道映射视频已删除")
-            except Exception as clean_err:
-                print(f"\n临时文件删除失败，请手动清理: {clean_err}")
+        public_path.unlink(missing_ok=True)
+
 
 if __name__ == "__main__":
     main()
